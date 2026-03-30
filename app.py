@@ -7,7 +7,6 @@ import plotly.express as px
 # ================= 网页基础设置 =================
 st.set_page_config(page_title="龙虾选股雷达 | 极简版", page_icon="🦞", layout="wide", initial_sidebar_state="expanded")
 
-# CSS: 指标卡片美化 & 强制表格居中
 st.markdown("""
     <style>
     [data-testid="stMetricValue"] { font-size: 2.2rem; font-weight: 700; color: #ff4b4b; }
@@ -42,21 +41,11 @@ file_path = os.path.join(data_dir, f"picks_{selected_date}.csv")
 try:
     df = pd.read_csv(file_path)
     
-    # 智能匹配列名 (移除了对"收盘"的模糊匹配，防止与"收盘涨幅"冲突)
+    # 智能匹配列名
     col_930 = [c for c in df.columns if '9:30' in c or '开盘' in c][0]
     col_945 = [c for c in df.columns if '9:45' in c or '现价' in c][0]
-    col_turnover = [c for c in df.columns if '换手' in c or 'turnover' in c][0]
     
-    # 智能寻找龙虾新增的“收盘涨幅”列
-    col_daily_change = [c for c in df.columns if '收盘涨幅' in c or '全天涨幅' in c or '今日涨幅' in c or '涨跌幅' in c]
-    has_daily_change = len(col_daily_change) > 0
-    if has_daily_change:
-        col_daily_change = col_daily_change[0]
-    
-    # 计算15分钟涨幅
     df['15分钟涨幅(%)'] = ((df[col_945] - df[col_930]) / df[col_930]) * 100
-    
-    # 侧边栏筛选逻辑
     display_df = df[df[col_945] > df[col_930]] if show_only_breakout else df.copy()
 
     # ======== 顶部核心数据 ========
@@ -68,36 +57,39 @@ try:
             win_rate = len(df[df[col_945] > df[col_930]]) / len(df) * 100
             st.metric("早盘突破率", f"{win_rate:.1f}%")
 
-    # ======== 数据清单 (强制居中 & 格式化) ========
+    # ======== 数据清单 (全自动智能排版) ========
     st.divider()
     st.subheader("📋 详细个股数据清单")
     
     if not display_df.empty:
-        # 优化列的展示顺序
         cols = display_df.columns.tolist()
         
-        # 1. 把 15分钟涨幅 放到 9:45价格 的后面
+        # 智能排期：把涨跌幅相关的列挪到前面方便看
         if '15分钟涨幅(%)' in cols:
             cols.insert(cols.index(col_945) + 1, cols.pop(cols.index('15分钟涨幅(%)')))
-            
-        # 2. 如果存在 收盘涨幅，把它放到 15分钟涨幅 的后面，方便对比
-        if has_daily_change and col_daily_change in cols:
-            cols.insert(cols.index('15分钟涨幅(%)') + 1, cols.pop(cols.index(col_daily_change)))
+        col_daily_change = [c for c in cols if '收盘涨幅' in c or '全天涨幅' in c or '涨跌幅' in c]
+        if col_daily_change:
+            cols.insert(cols.index('15分钟涨幅(%)') + 1, cols.pop(cols.index(col_daily_change[0])))
             
         display_df = display_df[cols]
-        
-        # 将数字强制转为带符号的字符串，锁定格式
         format_df = display_df.copy()
-        format_df[col_turnover] = pd.to_numeric(format_df[col_turnover], errors='coerce').apply(lambda x: f"{x:.2f} %")
-        format_df[col_930] = pd.to_numeric(format_df[col_930], errors='coerce').apply(lambda x: f"¥ {x:.2f}")
-        format_df[col_945] = pd.to_numeric(format_df[col_945], errors='coerce').apply(lambda x: f"¥ {x:.2f}")
-        format_df['15分钟涨幅(%)'] = pd.to_numeric(format_df['15分钟涨幅(%)'], errors='coerce').apply(lambda x: f"{x:.2f} %")
         
-        # 如果有收盘涨幅，也对它进行美化格式化
-        if has_daily_change:
-            format_df[col_daily_change] = pd.to_numeric(format_df[col_daily_change], errors='coerce').apply(lambda x: f"{x:.2f} %")
+        def fmt_pct(x): return f"{x:.2f} %" if pd.notna(x) else "-"
+        def fmt_price(x): return f"¥ {x:.2f}" if pd.notna(x) else "-"
+
+        # 🚀 核心大招：扫描所有列，自动识别并美化
+        for col in format_df.columns:
+            # 清理龙虾可能混入的文字百分号
+            if format_df[col].dtype == object and format_df[col].astype(str).str.contains('%').any():
+                format_df[col] = format_df[col].astype(str).str.replace('%', '', regex=False)
+                
+            # 只要列名带“价”（比如收盘价、最高价），全按价格格式化
+            if '价' in col:
+                format_df[col] = pd.to_numeric(format_df[col], errors='coerce').apply(fmt_price)
+            # 只要列名带“换手/涨幅/跌幅/率”，全按百分比格式化
+            elif '换手' in col or '涨幅' in col or '跌幅' in col or '率' in col:
+                format_df[col] = pd.to_numeric(format_df[col], errors='coerce').apply(fmt_pct)
         
-        # 使用 Styler 彻底居中并展示
         styled_df = format_df.style.set_properties(**{'text-align': 'center'})
         st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
