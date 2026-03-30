@@ -4,39 +4,24 @@ import os
 import glob
 import plotly.express as px
 
-# ================= 网页基础设置 (Pro v3.0) =================
-st.set_page_config(
-    page_title="龙虾选股雷达 | Pro",
-    page_icon="🦞",
-    layout="wide", 
-    initial_sidebar_state="expanded" 
-)
+# ================= 网页基础设置 (极简美观版) =================
+st.set_page_config(page_title="龙虾选股雷达 | 极简版", page_icon="🦞", layout="wide", initial_sidebar_state="expanded")
 
-# 注入 CSS 美化顶部数据卡片
-# 注意：这里已经修复为 unsafe_allow_html=True
+# CSS: 只保留顶部指标卡片的美化，以及强制表格居中的代码
 st.markdown("""
     <style>
-    [data-testid="stMetricValue"] {
-        font-size: 2.2rem;
-        font-weight: 700;
-        color: #ff4b4b;
-    }
-    [data-testid="stMetricLabel"] {
-        font-size: 1.1rem;
-        font-weight: 500;
-        color: #555;
-    }
+    [data-testid="stMetricValue"] { font-size: 2.2rem; font-weight: 700; color: #ff4b4b; }
+    [data-testid="stMetricLabel"] { font-size: 1.1rem; font-weight: 500; color: #555; }
+    [data-testid="stDataFrame"] div[data-testid="stTable"] td, 
+    [data-testid="stDataFrame"] div[data-testid="stTable"] th { text-align: center !important; }
     </style>
     """, unsafe_allow_html=True) 
 
 # ================= 左侧控制面板 =================
 with st.sidebar:
-    st.title("⚙️ 龙虾控制台 Pro")
-    
+    st.title("⚙️ 龙虾控制台")
     data_dir = "stock_data"
-    if not os.path.exists(data_dir):
-        os.makedirs(data_dir)
-    
+    if not os.path.exists(data_dir): os.makedirs(data_dir)
     csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
     
     if not csv_files:
@@ -45,17 +30,12 @@ with st.sidebar:
         
     available_dates = sorted([os.path.basename(f).replace("picks_", "").replace(".csv", "") for f in csv_files], reverse=True)
     selected_date = st.selectbox("📅 选择复盘日期", available_dates)
-    
     st.divider()
-    st.subheader("🎯 走势二次筛选")
-    show_only_breakout = st.checkbox("🔥 仅看 9:45 价格突破 9:30 开盘价", value=False)
-    
-    st.divider()
-    st.caption("📊 数据源: Openclaw 自动抓取")
+    show_only_breakout = st.checkbox("🔥 仅看 9:45 价格突破 9:30 的强势股", value=False)
 
 # ================= 右侧主展区 =================
 st.title("🦞 龙虾每日初筛雷达")
-st.markdown(f"**当前复盘日期：** `{selected_date}` ｜ **初始过滤条件：** 9:30-9:45 实际换手率 > 10%")
+st.markdown(f"**当前日期：** `{selected_date}` ｜ **初始过滤：** 9:30-9:45 换手率 > 10%")
 
 file_path = os.path.join(data_dir, f"picks_{selected_date}.csv")
 
@@ -67,94 +47,76 @@ try:
     col_945 = [c for c in df.columns if '9:45' in c or '现价' in c or '收盘' in c][0]
     col_turnover = [c for c in df.columns if '换手' in c or 'turnover' in c][0]
     
-    # ======== 计算涨幅 ========
+    # 计算涨幅
     df['15分钟涨幅(%)'] = ((df[col_945] - df[col_930]) / df[col_930]) * 100
     
-    # 根据侧边栏开关进行动态筛选
-    if show_only_breakout:
-        display_df = df[df[col_945] > df[col_930]]
-    else:
-        display_df = df
+    # 筛选逻辑
+    display_df = df[df[col_945] > df[col_930]] if show_only_breakout else df.copy()
 
-    # ======== 美化区 1：顶部核心数据卡片 ========
+    # ======== 顶部核心数据 ========
     m_col1, m_col2, m_col3 = st.columns(3)
-    with m_col1:
-        st.metric("初筛达标总数 (>10%换手)", f"{len(df)} 只")
-    with m_col2:
-        st.metric("当前筛选展示数量", f"{len(display_df)} 只")
+    with m_col1: st.metric("基础达标总数", f"{len(df)} 只")
+    with m_col2: st.metric("当前展示数量", f"{len(display_df)} 只")
     with m_col3:
         if len(df) > 0:
             win_rate = len(df[df[col_945] > df[col_930]]) / len(df) * 100
             st.metric("早盘价格突破率", f"{win_rate:.1f}%")
 
-    # ======== 美化区 2：精修数据表格 ========
+    # ======== 数据清单 (强制居中 & 格式化) ========
     st.divider()
     st.subheader("📋 详细个股数据清单")
     
-    # 自动将展示的列按逻辑排序
-    cols = display_df.columns.tolist()
-    if '15分钟涨幅(%)' in cols:
-        cols.insert(cols.index(col_945) + 1, cols.pop(cols.index('15分钟涨幅(%)')))
-        display_df = display_df[cols]
-
-    st.dataframe(
-        display_df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            col_turnover: st.column_config.NumberColumn("换手率(%)", format="%.2f %%"),
-            col_930: st.column_config.NumberColumn("9:30开盘价", format="¥ %.2f"),
-            col_945: st.column_config.NumberColumn("9:45价格", format="¥ %.2f"),
-            "15分钟涨幅(%)": st.column_config.NumberColumn("15分钟涨幅", format="%.2f %%"),
-        }
-    )
-    
-    # ======== 美化区 3：高级交互图表 ========
     if not display_df.empty:
+        # 重排行列
+        cols = display_df.columns.tolist()
+        if '15分钟涨幅(%)' in cols:
+            cols.insert(cols.index(col_945) + 1, cols.pop(cols.index('15分钟涨幅(%)')))
+            display_df = display_df[cols]
+        
+        # 提前把数字变成带符号的文字，防止 Streamlit 乱调格式
+        format_df = display_df.copy()
+        format_df[col_turnover] = format_df[col_turnover].apply(lambda x: f"{x:.2f} %")
+        format_df[col_930] = format_df[col_930].apply(lambda x: f"¥ {x:.2f}")
+        format_df[col_945] = format_df[col_945].apply(lambda x: f"¥ {x:.2f}")
+        format_df['15分钟涨幅(%)'] = format_df['15分钟涨幅(%)'].apply(lambda x: f"{x:.2f} %")
+        
+        # 使用 Styler 彻底居中并展示
+        styled_df = format_df.style.set_properties(**{'text-align': 'center'})
+        st.dataframe(styled_df, use_container_width=True, hide_index=True)
+
+    # ======== 极简可视化分析 ========
+    if not display_df.empty and '行业' in display_df.columns:
         st.divider()
-        st.subheader("📊 热点分布可视化分析")
+        st.subheader("📊 热门行业分布")
         
-        c_col1, c_col2 = st.columns([1, 1.5]) 
+        industry_counts = display_df['行业'].value_counts().reset_index()
+        industry_counts.columns = ['行业', '股票数量']
+        top_industry = industry_counts.head(15).sort_values(by='股票数量', ascending=True)
         
-        with c_col1:
-            if '板块' in display_df.columns:
-                st.write("**板块占比 (环形图)**")
-                sector_counts = display_df['板块'].value_counts().reset_index()
-                sector_counts.columns = ['板块', '股票数量']
-                
-                fig_sector = px.pie(
-                    sector_counts, 
-                    values='股票数量', 
-                    names='板块',
-                    hole=0.4, 
-                    color_discrete_sequence=px.colors.qualitative.Pastel
-                )
-                fig_sector.update_traces(textposition='inside', textinfo='percent+label')
-                fig_sector.update_layout(showlegend=False, margin=dict(l=0, r=0, t=10, b=0))
-                st.plotly_chart(fig_sector, use_container_width=True)
-                
-        with c_col2:
-            if '行业' in display_df.columns:
-                st.write("**热门行业排行 (横向条形图)**")
-                industry_counts = display_df['行业'].value_counts().reset_index()
-                industry_counts.columns = ['行业', '股票数量']
-                
-                top_industry = industry_counts.head(15).sort_values(by='股票数量', ascending=True)
-                
-                fig_industry = px.bar(
-                    top_industry,
-                    x='股票数量',
-                    y='行业',
-                    orientation='h', 
-                    color='股票数量', 
-                    color_continuous_scale='Blues'
-                )
-                fig_industry.update_layout(
-                    xaxis=dict(tickmode='linear', dtick=1), 
-                    coloraxis_showscale=False, 
-                    margin=dict(l=0, r=0, t=10, b=0)
-                )
-                st.plotly_chart(fig_industry, use_container_width=True)
+        # 极简画图法：无背景网格，数字直接写在柱子外侧，高级的海蓝色
+        fig_industry = px.bar(
+            top_industry, 
+            x='股票数量', 
+            y='行业', 
+            orientation='h', 
+            text='股票数量' 
+        )
+        
+        fig_industry.update_traces(
+            marker_color='#3b71ca', 
+            textposition='outside', 
+            textfont_size=13
+        )
+        
+        fig_industry.update_layout(
+            plot_bgcolor='rgba(0,0,0,0)', 
+            xaxis=dict(visible=False), 
+            yaxis=dict(title=None, tickfont_size=14), 
+            margin=dict(l=0, r=40, t=10, b=0), 
+            height=400 + len(top_industry) * 15 
+        )
+        
+        st.plotly_chart(fig_industry, use_container_width=True)
 
 except Exception as e:
     st.error(f"读取数据时出错，请检查 CSV 格式。详细报错: {e}")
