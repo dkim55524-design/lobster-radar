@@ -57,7 +57,7 @@ try:
             win_rate = len(df[df[col_945] > df[col_930]]) / len(df) * 100
             st.metric("早盘突破率", f"{win_rate:.1f}%")
 
-    # ======== 数据清单 (全自动智能排版) ========
+    # ======== 数据清单 (全自动智能排版 + 红绿变色) ========
     st.divider()
     st.subheader("📋 详细个股数据清单")
     
@@ -77,20 +77,41 @@ try:
         def fmt_pct(x): return f"{x:.2f} %" if pd.notna(x) else "-"
         def fmt_price(x): return f"¥ {x:.2f}" if pd.notna(x) else "-"
 
-        # 🚀 核心大招：扫描所有列，自动识别并美化
+        # 扫描所有列并加上单位
         for col in format_df.columns:
-            # 清理龙虾可能混入的文字百分号
             if format_df[col].dtype == object and format_df[col].astype(str).str.contains('%').any():
                 format_df[col] = format_df[col].astype(str).str.replace('%', '', regex=False)
                 
-            # 只要列名带“价”（比如收盘价、最高价），全按价格格式化
             if '价' in col:
                 format_df[col] = pd.to_numeric(format_df[col], errors='coerce').apply(fmt_price)
-            # 只要列名带“换手/涨幅/跌幅/率”，全按百分比格式化
             elif '换手' in col or '涨幅' in col or '跌幅' in col or '率' in col:
                 format_df[col] = pd.to_numeric(format_df[col], errors='coerce').apply(fmt_pct)
         
+        # 🎨 核心魔法：红涨绿跌判断引擎
+        def color_red_green(val):
+            if isinstance(val, str) and '%' in val:
+                try:
+                    num = float(val.replace('%', '').strip())
+                    if num > 0:
+                        return 'color: #ff4b4b;' # 强势红
+                    elif num < 0:
+                        return 'color: #00c04b;' # 弱势绿
+                except:
+                    pass
+            return ''
+        
+        # 1. 给整个表格打底居中
         styled_df = format_df.style.set_properties(**{'text-align': 'center'})
+        
+        # 2. 找到所有带“涨幅”或“跌幅”的列（包含15分钟和收盘），精准上色
+        change_cols = [c for c in format_df.columns if '涨幅' in c or '跌幅' in c]
+        if change_cols:
+            # 兼容 Streamlit 云端的最新版和旧版 Pandas
+            try:
+                styled_df = styled_df.map(color_red_green, subset=change_cols)
+            except AttributeError:
+                styled_df = styled_df.applymap(color_red_green, subset=change_cols)
+
         st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
     # ======== 极简可视化分析 ========
