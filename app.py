@@ -4,10 +4,10 @@ import os
 import glob
 import plotly.express as px
 
-# ================= 网页基础设置 (极简美观版) =================
+# ================= 网页基础设置 =================
 st.set_page_config(page_title="龙虾选股雷达 | 极简版", page_icon="🦞", layout="wide", initial_sidebar_state="expanded")
 
-# CSS: 只保留顶部指标卡片的美化，以及强制表格居中的代码
+# CSS: 指标卡片美化 & 强制表格居中
 st.markdown("""
     <style>
     [data-testid="stMetricValue"] { font-size: 2.2rem; font-weight: 700; color: #ff4b4b; }
@@ -42,15 +42,21 @@ file_path = os.path.join(data_dir, f"picks_{selected_date}.csv")
 try:
     df = pd.read_csv(file_path)
     
-    # 智能匹配列名
+    # 智能匹配列名 (移除了对"收盘"的模糊匹配，防止与"收盘涨幅"冲突)
     col_930 = [c for c in df.columns if '9:30' in c or '开盘' in c][0]
-    col_945 = [c for c in df.columns if '9:45' in c or '现价' in c or '收盘' in c][0]
+    col_945 = [c for c in df.columns if '9:45' in c or '现价' in c][0]
     col_turnover = [c for c in df.columns if '换手' in c or 'turnover' in c][0]
     
-    # 计算涨幅
+    # 智能寻找龙虾新增的“收盘涨幅”列
+    col_daily_change = [c for c in df.columns if '收盘涨幅' in c or '全天涨幅' in c or '今日涨幅' in c or '涨跌幅' in c]
+    has_daily_change = len(col_daily_change) > 0
+    if has_daily_change:
+        col_daily_change = col_daily_change[0]
+    
+    # 计算15分钟涨幅
     df['15分钟涨幅(%)'] = ((df[col_945] - df[col_930]) / df[col_930]) * 100
     
-    # 筛选逻辑
+    # 侧边栏筛选逻辑
     display_df = df[df[col_945] > df[col_930]] if show_only_breakout else df.copy()
 
     # ======== 顶部核心数据 ========
@@ -60,25 +66,36 @@ try:
     with m_col3:
         if len(df) > 0:
             win_rate = len(df[df[col_945] > df[col_930]]) / len(df) * 100
-            st.metric("早盘价格突破率", f"{win_rate:.1f}%")
+            st.metric("早盘突破率", f"{win_rate:.1f}%")
 
     # ======== 数据清单 (强制居中 & 格式化) ========
     st.divider()
     st.subheader("📋 详细个股数据清单")
     
     if not display_df.empty:
-        # 重排行列
+        # 优化列的展示顺序
         cols = display_df.columns.tolist()
+        
+        # 1. 把 15分钟涨幅 放到 9:45价格 的后面
         if '15分钟涨幅(%)' in cols:
             cols.insert(cols.index(col_945) + 1, cols.pop(cols.index('15分钟涨幅(%)')))
-            display_df = display_df[cols]
+            
+        # 2. 如果存在 收盘涨幅，把它放到 15分钟涨幅 的后面，方便对比
+        if has_daily_change and col_daily_change in cols:
+            cols.insert(cols.index('15分钟涨幅(%)') + 1, cols.pop(cols.index(col_daily_change)))
+            
+        display_df = display_df[cols]
         
-        # 提前把数字变成带符号的文字，防止 Streamlit 乱调格式
+        # 将数字强制转为带符号的字符串，锁定格式
         format_df = display_df.copy()
-        format_df[col_turnover] = format_df[col_turnover].apply(lambda x: f"{x:.2f} %")
-        format_df[col_930] = format_df[col_930].apply(lambda x: f"¥ {x:.2f}")
-        format_df[col_945] = format_df[col_945].apply(lambda x: f"¥ {x:.2f}")
-        format_df['15分钟涨幅(%)'] = format_df['15分钟涨幅(%)'].apply(lambda x: f"{x:.2f} %")
+        format_df[col_turnover] = pd.to_numeric(format_df[col_turnover], errors='coerce').apply(lambda x: f"{x:.2f} %")
+        format_df[col_930] = pd.to_numeric(format_df[col_930], errors='coerce').apply(lambda x: f"¥ {x:.2f}")
+        format_df[col_945] = pd.to_numeric(format_df[col_945], errors='coerce').apply(lambda x: f"¥ {x:.2f}")
+        format_df['15分钟涨幅(%)'] = pd.to_numeric(format_df['15分钟涨幅(%)'], errors='coerce').apply(lambda x: f"{x:.2f} %")
+        
+        # 如果有收盘涨幅，也对它进行美化格式化
+        if has_daily_change:
+            format_df[col_daily_change] = pd.to_numeric(format_df[col_daily_change], errors='coerce').apply(lambda x: f"{x:.2f} %")
         
         # 使用 Styler 彻底居中并展示
         styled_df = format_df.style.set_properties(**{'text-align': 'center'})
@@ -93,29 +110,13 @@ try:
         industry_counts.columns = ['行业', '股票数量']
         top_industry = industry_counts.head(15).sort_values(by='股票数量', ascending=True)
         
-        # 极简画图法：无背景网格，数字直接写在柱子外侧，高级的海蓝色
-        fig_industry = px.bar(
-            top_industry, 
-            x='股票数量', 
-            y='行业', 
-            orientation='h', 
-            text='股票数量' 
-        )
-        
-        fig_industry.update_traces(
-            marker_color='#3b71ca', 
-            textposition='outside', 
-            textfont_size=13
-        )
-        
+        fig_industry = px.bar(top_industry, x='股票数量', y='行业', orientation='h', text='股票数量')
+        fig_industry.update_traces(marker_color='#3b71ca', textposition='outside', textfont_size=13)
         fig_industry.update_layout(
-            plot_bgcolor='rgba(0,0,0,0)', 
-            xaxis=dict(visible=False), 
-            yaxis=dict(title=None, tickfont_size=14), 
-            margin=dict(l=0, r=40, t=10, b=0), 
+            plot_bgcolor='rgba(0,0,0,0)', xaxis=dict(visible=False), 
+            yaxis=dict(title=None, tickfont_size=14), margin=dict(l=0, r=40, t=10, b=0), 
             height=400 + len(top_industry) * 15 
         )
-        
         st.plotly_chart(fig_industry, use_container_width=True)
 
 except Exception as e:
