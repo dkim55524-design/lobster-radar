@@ -8,11 +8,12 @@ import plotly.express as px
 st.set_page_config(
     page_title="龙虾选股雷达 | Pro",
     page_icon="🦞",
-    layout="wide", # 启用宽屏，让图表有更多空间展示
+    layout="wide", 
     initial_sidebar_state="expanded" 
 )
 
 # 注入 CSS 美化顶部数据卡片
+# 注意：这里已经修复为 unsafe_allow_html=True
 st.markdown("""
     <style>
     [data-testid="stMetricValue"] {
@@ -26,7 +27,7 @@ st.markdown("""
         color: #555;
     }
     </style>
-    """, unsafe_allow_stdio=True)
+    """, unsafe_allow_html=True) 
 
 # ================= 左侧控制面板 =================
 with st.sidebar:
@@ -113,7 +114,7 @@ try:
         st.divider()
         st.subheader("📊 热点分布可视化分析")
         
-        c_col1, c_col2 = st.columns([1, 1.5]) # 左边饼图略小，右边条形图略宽
+        c_col1, c_col2 = st.columns([1, 1.5]) 
         
         with c_col1:
             if '板块' in display_df.columns:
@@ -137,7 +138,7 @@ try:
                 st.write("**热门行业排行 (横向条形图)**")
                 industry_counts = display_df['行业'].value_counts().reset_index()
                 industry_counts.columns = ['行业', '股票数量']
-                # 只取前15个热门行业，并升序排列以便画图时最多的在最上面
+                
                 top_industry = industry_counts.head(15).sort_values(by='股票数量', ascending=True)
                 
                 fig_industry = px.bar(
