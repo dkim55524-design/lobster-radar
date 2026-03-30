@@ -5,7 +5,8 @@ import glob
 import plotly.express as px
 
 # ================= 网页基础设置 =================
-st.set_page_config(page_title="龙虾选股雷达 | 极简版", page_icon="🦞", layout="wide", initial_sidebar_state="expanded")
+# 👉 这里可以修改网页标签页的名字和图标
+st.set_page_config(page_title="强势突破监控雷达", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
@@ -18,13 +19,15 @@ st.markdown("""
 
 # ================= 左侧控制面板 =================
 with st.sidebar:
-    st.title("⚙️ 龙虾控制台")
+    # 👉 这里可以修改左侧边栏的控制台标题
+    st.title("⚙️ 策略控制台")
     data_dir = "stock_data"
     if not os.path.exists(data_dir): os.makedirs(data_dir)
     csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
     
     if not csv_files:
-        st.warning("📭 暂无数据，请等待龙虾上传。")
+        # 👉 这里修改没有数据时的提示语
+        st.warning("📭 暂无数据，请等待今日复盘数据上传。")
         st.stop()
         
     available_dates = sorted([os.path.basename(f).replace("picks_", "").replace(".csv", "") for f in csv_files], reverse=True)
@@ -33,7 +36,8 @@ with st.sidebar:
     show_only_breakout = st.checkbox("🔥 仅看 9:45 价格突破 9:30 的强势股", value=False)
 
 # ================= 右侧主展区 =================
-st.title("🦞 龙虾每日初筛雷达")
+# 👉 这里修改网页主标题
+st.title("⚡ 每日强势股初筛看板")
 st.markdown(f"**当前日期：** `{selected_date}` ｜ **初始过滤：** 9:30-9:45 换手率 > 10%")
 
 file_path = os.path.join(data_dir, f"picks_{selected_date}.csv")
@@ -41,7 +45,6 @@ file_path = os.path.join(data_dir, f"picks_{selected_date}.csv")
 try:
     df = pd.read_csv(file_path)
     
-    # 智能匹配列名
     col_930 = [c for c in df.columns if '9:30' in c or '开盘' in c][0]
     col_945 = [c for c in df.columns if '9:45' in c or '现价' in c][0]
     
@@ -57,14 +60,13 @@ try:
             win_rate = len(df[df[col_945] > df[col_930]]) / len(df) * 100
             st.metric("早盘突破率", f"{win_rate:.1f}%")
 
-    # ======== 数据清单 (全自动智能排版 + 红绿变色) ========
+    # ======== 数据清单 ========
     st.divider()
     st.subheader("📋 详细个股数据清单")
     
     if not display_df.empty:
         cols = display_df.columns.tolist()
         
-        # 智能排期：把涨跌幅相关的列挪到前面方便看
         if '15分钟涨幅(%)' in cols:
             cols.insert(cols.index(col_945) + 1, cols.pop(cols.index('15分钟涨幅(%)')))
         col_daily_change = [c for c in cols if '收盘涨幅' in c or '全天涨幅' in c or '涨跌幅' in c]
@@ -77,7 +79,6 @@ try:
         def fmt_pct(x): return f"{x:.2f} %" if pd.notna(x) else "-"
         def fmt_price(x): return f"¥ {x:.2f}" if pd.notna(x) else "-"
 
-        # 扫描所有列并加上单位
         for col in format_df.columns:
             if format_df[col].dtype == object and format_df[col].astype(str).str.contains('%').any():
                 format_df[col] = format_df[col].astype(str).str.replace('%', '', regex=False)
@@ -87,26 +88,22 @@ try:
             elif '换手' in col or '涨幅' in col or '跌幅' in col or '率' in col:
                 format_df[col] = pd.to_numeric(format_df[col], errors='coerce').apply(fmt_pct)
         
-        # 🎨 核心魔法：红涨绿跌判断引擎
         def color_red_green(val):
             if isinstance(val, str) and '%' in val:
                 try:
                     num = float(val.replace('%', '').strip())
                     if num > 0:
-                        return 'color: #ff4b4b;' # 强势红
+                        return 'color: #ff4b4b;' 
                     elif num < 0:
-                        return 'color: #00c04b;' # 弱势绿
+                        return 'color: #00c04b;' 
                 except:
                     pass
             return ''
         
-        # 1. 给整个表格打底居中
         styled_df = format_df.style.set_properties(**{'text-align': 'center'})
         
-        # 2. 找到所有带“涨幅”或“跌幅”的列（包含15分钟和收盘），精准上色
         change_cols = [c for c in format_df.columns if '涨幅' in c or '跌幅' in c]
         if change_cols:
-            # 兼容 Streamlit 云端的最新版和旧版 Pandas
             try:
                 styled_df = styled_df.map(color_red_green, subset=change_cols)
             except AttributeError:
